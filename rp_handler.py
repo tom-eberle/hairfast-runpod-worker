@@ -32,16 +32,30 @@ import torchvision.transforms as transforms  # noqa: E402
 
 import runpod  # noqa: E402
 
-from hair_swap import HairFast, get_parser  # noqa: E402
-
 
 # --------------------------------------------------------------------------- #
-# Cold start: build the model exactly once.
+# Model is built LAZILY on the first request (not at import) so that:
+#   1. runpod.serverless.start() registers the worker immediately, and
+#   2. any failure building the model is caught inside handler() and returned
+#      to the caller as {"error": <traceback>} instead of silently crashing the
+#      worker process (which would leave the job stuck IN_QUEUE forever).
+# The built model is cached in _MODEL and reused across invocations.
 # --------------------------------------------------------------------------- #
-print("[hairfast] Loading HairFast model (cold start)...", flush=True)
-_model_args = get_parser().parse_args([])
-HAIR_FAST = HairFast(_model_args)
-print("[hairfast] Model loaded.", flush=True)
+_MODEL = None
+
+
+def _get_model():
+    global _MODEL
+    if _MODEL is None:
+        print("[hairfast] Loading HairFast model (first request)...", flush=True)
+        # Import here too: importing hair_swap pulls in StyleGAN2 / op modules
+        # that may compile CUDA extensions, so import errors are also caught.
+        from hair_swap import HairFast, get_parser
+        args = get_parser().parse_args([])
+        _MODEL = HairFast(args)
+        print("[hairfast] Model loaded.", flush=True)
+    return _MODEL
+
 
 _TO_PIL = transforms.ToPILImage()
 # Accepted values for the (currently demo-only) blending mode field.
@@ -114,6 +128,9 @@ def handler(event):
     """
     temp_files = []
     try:
+        # Lazy model build (cached). A failure here is reported to the caller.
+        model = _get_model()
+
         inp = event.get("input") or {}
 
         face = inp.get("face")
@@ -152,7 +169,7 @@ def handler(event):
             color_path = face_path
 
         with torch.inference_mode():
-            result = HAIR_FAST.swap(
+            result = model.swap(
                 face_path,
                 shape_path,
                 color_path,
@@ -180,9 +197,10 @@ def handler(event):
 
         return {"image": encoded}
 
-    except Exception as exc:  # noqa: BLE001 - surface any failure to the caller
+    except Exception:  # noqa: BLE001 - surface any failure (incl. model load) to the caller
+        tb = traceback.format_exc()
         traceback.print_exc()
-        return {"error": str(exc)}
+        return {"error": tb}
     finally:
         for path in temp_files:
             try:
