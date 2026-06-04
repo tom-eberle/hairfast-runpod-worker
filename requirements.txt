@@ -1,0 +1,9 @@
+# Runtime-only Python deps for the RunPod handler that are NOT installed by the
+# HairFastGAN dependency set in the Dockerfile.
+#
+# NOTE: torch / torchvision / torchaudio / dlib / face_alignment / CLIP and the
+# rest of the HairFastGAN deps are installed explicitly in the Dockerfile using
+# the *exact* versions proven to work in camenduru/HairFastGAN-replicate
+# (cog.yaml). Do not pin torch here or you risk overriding the +cu121 wheels.
+runpod>=1.6.0
+requests>=2.31.0
