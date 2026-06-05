@@ -87,7 +87,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # large *static* archives the -dev packages add (~2 GB) to keep the image slim.
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
-        python3.10 ca-certificates \
+        python3.10 python3.10-dev ca-certificates \
         libgl1 libglib2.0-0 ffmpeg libgomp1 \
         g++ cuda-nvcc-12-1 cuda-cudart-dev-12-1 cuda-libraries-dev-12-1 && \
     rm -rf /var/lib/apt/lists/* && \
