@@ -98,9 +98,14 @@ RUN apt-get update -y && \
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /content/HairFastGAN /content/HairFastGAN
 
+# Weights are NOT baked here: downloading the ~5 GB of HF weights during the
+# GitHub Actions build is hard-throttled (HTTP 429 from HF on shared CI IPs).
+# Instead the handler fetches them on first cold start from RunPod's network
+# (dedicated IPs, not HF-throttled), which also keeps the image ~5 GB smaller
+# and the build fast + 429-proof. download_weights.py is idempotent (skips files
+# already present), so a warm worker never re-downloads.
 COPY download_weights.py /download_weights.py
 WORKDIR ${HAIRFAST_DIR}
-RUN python3 /download_weights.py
 
 COPY rp_handler.py ${HAIRFAST_DIR}/rp_handler.py
 

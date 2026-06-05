@@ -44,9 +44,26 @@ import runpod  # noqa: E402
 _MODEL = None
 
 
+def _ensure_weights():
+    """
+    Download the HF pretrained weights on first cold start (they are not baked
+    into the image — see Dockerfile). Idempotent: download_weights.py skips any
+    file already present, so a warm worker no-ops here. Runs from HAIRFAST_DIR so
+    weights land in ./pretrained_models (where HairFast() expects them).
+    """
+    marker = os.path.join(HAIRFAST_DIR, "pretrained_models", "StyleGAN", "ffhq.pt")
+    if os.path.exists(marker) and os.path.getsize(marker) > 0:
+        return
+    print("[hairfast] Downloading pretrained weights (first cold start)...", flush=True)
+    import subprocess
+    subprocess.run([sys.executable, "/download_weights.py"], cwd=HAIRFAST_DIR, check=True)
+    print("[hairfast] Weights ready.", flush=True)
+
+
 def _get_model():
     global _MODEL
     if _MODEL is None:
+        _ensure_weights()
         print("[hairfast] Loading HairFast model (first request)...", flush=True)
         # Import here too: importing hair_swap pulls in StyleGAN2 / op modules
         # that may compile CUDA extensions, so import errors are also caught.
