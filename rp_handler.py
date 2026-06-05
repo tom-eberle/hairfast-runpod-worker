@@ -27,6 +27,17 @@ HAIRFAST_DIR = os.environ.get("HAIRFAST_DIR", "/content/HairFastGAN")
 sys.path.append(HAIRFAST_DIR)
 os.chdir(HAIRFAST_DIR)
 
+# StyleGAN2's ops JIT-compile via torch at first import; torch shells out to
+# `which c++` / `nvcc`. RunPod's serverless launcher can start the handler with a
+# PATH that omits /usr/bin (and /usr/local/cuda/bin), so force the compiler dirs
+# on now — otherwise the compile fails with "which c++ returned non-zero".
+os.environ["PATH"] = ":".join([
+    "/opt/venv/bin", "/usr/local/cuda/bin",
+    "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin",
+    os.environ.get("PATH", ""),
+]).rstrip(":")
+os.environ.setdefault("CUDA_HOME", "/usr/local/cuda")
+
 import torch  # noqa: E402
 import torchvision.transforms as transforms  # noqa: E402
 
