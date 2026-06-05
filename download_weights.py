@@ -12,6 +12,8 @@ Run from inside the HairFastGAN repo dir, e.g.:
 
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 
 HF_BASE = "https://huggingface.co/AIRI-Institute/HairFastGAN/resolve/main/pretrained_models"
@@ -49,12 +51,7 @@ FILES = [
 ]
 
 
-def download(url: str, dest: str) -> None:
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if os.path.exists(dest) and os.path.getsize(dest) > 0:
-        print(f"[skip] {dest} already present", flush=True)
-        return
-    print(f"[get ] {url} -> {dest}", flush=True)
+def _download_once(url: str, dest: str) -> None:
     # HF resolve URLs 302-redirect to a CDN; urllib follows redirects.
     req = urllib.request.Request(url, headers={"User-Agent": "hairfast-runpod-worker"})
     with urllib.request.urlopen(req, timeout=600) as resp, open(dest, "wb") as fh:
@@ -63,6 +60,44 @@ def download(url: str, dest: str) -> None:
             if not chunk:
                 break
             fh.write(chunk)
+
+
+def download(url: str, dest: str, max_attempts: int = 6) -> None:
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest) and os.path.getsize(dest) > 0:
+        print(f"[skip] {dest} already present", flush=True)
+        return
+    print(f"[get ] {url} -> {dest}", flush=True)
+    # HF (esp. from shared CI IPs) throttles bursts with HTTP 429. Retry with
+    # backoff, honoring Retry-After, and also retry transient 5xx / network errs.
+    for attempt in range(1, max_attempts + 1):
+        try:
+            _download_once(url, dest)
+            return
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or 500 <= exc.code < 600
+            if not retryable or attempt == max_attempts:
+                raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                wait = float(retry_after) if retry_after else 0.0
+            except ValueError:
+                wait = 0.0
+            wait = max(wait, min(60.0, 3.0 * (2 ** (attempt - 1))))
+            print(f"[retry] {url} HTTP {exc.code} (attempt {attempt}/{max_attempts}); "
+                  f"sleeping {wait:.0f}s", flush=True)
+            time.sleep(wait)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt == max_attempts:
+                raise
+            wait = min(60.0, 3.0 * (2 ** (attempt - 1)))
+            print(f"[retry] {url} {exc} (attempt {attempt}/{max_attempts}); "
+                  f"sleeping {wait:.0f}s", flush=True)
+            time.sleep(wait)
+        finally:
+            # A partial file from a failed attempt must not look "already present".
+            if os.path.exists(dest) and os.path.getsize(dest) == 0:
+                os.remove(dest)
 
 
 def main() -> int:
@@ -74,6 +109,7 @@ def main() -> int:
         dest = os.path.join(base_dir, rel_dest)
         try:
             download(url, dest)
+            time.sleep(0.5)  # small spacing to avoid bursty 429s from HF
         except Exception as exc:  # noqa: BLE001
             print(f"[FAIL] {url}: {exc}", flush=True)
             failures.append((url, str(exc)))

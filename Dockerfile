@@ -68,6 +68,11 @@ RUN pip install \
         runpod \
         requests
 
+# torch 2.2.1 was built against NumPy 1.x; several deps above pull NumPy 2.x,
+# which breaks torch<->numpy interop at runtime ("Failed to initialize NumPy:
+# _ARRAY_API not found"). Pin back to the last 1.x release. Done last so it wins.
+RUN pip install "numpy==1.26.4"
+
 # Clone the model code (shallow) and PRE-COMPILE the StyleGAN2 CUDA ops so the
 # compiled .so files land in /root/.cache/torch_extensions. nvcc is present in
 # this devel stage; no GPU is required because TORCH_CUDA_ARCH_LIST is pinned.
