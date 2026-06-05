@@ -90,17 +90,24 @@ ARG TORCH_ARCHES
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     HAIRFAST_DIR=/content/HairFastGAN \
-    PATH=/opt/venv/bin:$PATH \
-    # Must match the builder so torch reuses the prebuilt op cache (no recompile,
-    # which would fail here — runtime base has no nvcc).
+    CUDA_HOME=/usr/local/cuda \
+    PATH=/opt/venv/bin:/usr/local/cuda/bin:$PATH \
+    # Match the builder so torch can reuse the prebuilt op cache when its build
+    # hash hits; if it misses, the toolchain below recompiles for these arches.
     TORCH_CUDA_ARCH_LIST="${TORCH_ARCHES}"
 
-# Runtime system libs only (no toolchain): OpenCV/GL, glib, ffmpeg, OpenMP.
+# Runtime system libs + a MINIMAL CUDA compile toolchain. StyleGAN2's ops use
+# torch cpp_extension.load() which recomputes a build hash at runtime and may
+# choose to (re)compile rather than reuse a copied cache; it needs g++ + nvcc +
+# cudart headers to do so. We install just those (not the full devel base), so
+# the image stays far smaller than the original ~16 GB devel build while the op
+# JIT-compile reliably succeeds (and reuses our baked cache when the hash hits).
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
         python3.10 \
         ca-certificates \
-        libgl1 libglib2.0-0 ffmpeg libgomp1 && \
+        libgl1 libglib2.0-0 ffmpeg libgomp1 \
+        g++ cuda-nvcc-12-1 cuda-cudart-dev-12-1 && \
     rm -rf /var/lib/apt/lists/* && \
     ln -sf /usr/bin/python3.10 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.10 /usr/bin/python
